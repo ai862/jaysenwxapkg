@@ -47,8 +47,12 @@ jobs:
           GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} \
             go build -ldflags="-s -w" -o "${BINARY}${EXT}" .
 
-          # UPX 压缩
-          upx --best --lzma "${BINARY}${EXT}"
+          # UPX 压缩（windows-arm64 不支持，跳过）
+          if [ "${{ matrix.os }}" = "windows" ] && [ "${{ matrix.arch }}" = "arm64" ]; then
+            echo "UPX 不支持 windows-arm64，跳过压缩"
+          else
+            upx --best --lzma "${BINARY}${EXT}" || echo "UPX 压缩失败，保留未压缩版本"
+          fi
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
