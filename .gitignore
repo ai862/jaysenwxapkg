@@ -1,0 +1,23 @@
+# 编译产物
+jaysenwxapkg
+jaysenwxapkg.exe
+output/
+batch-output/
+
+# 临时文件
+*.log
+*.tmp
+/tmp/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Go
+vendor/
+*.test
+*.out
