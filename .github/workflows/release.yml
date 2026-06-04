@@ -32,6 +32,9 @@ jobs:
           sudo apt-get install -y upx-ucl
           upx --version
 
+      - name: Resolve dependencies
+        run: go mod tidy
+
       - name: Build and compress
         shell: bash
         run: |
