@@ -4,6 +4,9 @@ jaysenwxapkg.exe
 output/
 batch-output/
 
+# 测试数据（wx 开头的目录）
+wx*/
+
 # 临时文件
 *.log
 *.tmp
@@ -16,6 +19,9 @@ batch-output/
 *.swo
 *~
 .DS_Store
+
+# Reasonix 临时文件
+.reasonix/
 
 # Go
 vendor/
