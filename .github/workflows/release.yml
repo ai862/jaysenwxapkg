@@ -73,18 +73,29 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
 
-      - name: List artifacts
-        run: ls -laR
-
-      - name: Generate checksums
+      - name: Rename and generate checksums
         run: |
-          find . -type f -name "jaysenwxapkg-*" -exec sha256sum {} \; > checksums.txt
+          for dir in jaysenwxapkg-*/; do
+            PLATFORM="${dir%/}"
+            # 把 jaysenwxapkg 或 jaysenwxapkg.exe 重命名为带平台名的
+            for binary in "${dir}"jaysenwxapkg*; do
+              if [ -f "$binary" ]; then
+                EXT=""
+                if [[ "$binary" == *.exe ]]; then EXT=".exe"; fi
+                NEWNAME="jaysenwxapkg-${PLATFORM#jaysenwxapkg-}${EXT}"
+                mv "$binary" "$NEWNAME"
+                echo "Renamed: $binary -> $NEWNAME"
+              fi
+            done
+            rmdir "$dir" 2>/dev/null || true
+          done
+          sha256sum jaysenwxapkg-* > checksums.txt
           cat checksums.txt
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            jaysenwxapkg-*/*
+            jaysenwxapkg-*
             checksums.txt
           generate_release_notes: true
