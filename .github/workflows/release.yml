@@ -74,21 +74,27 @@ jobs:
         uses: actions/download-artifact@v4
 
       - name: Rename and generate checksums
+        shell: bash
         run: |
+          set -e
           for dir in jaysenwxapkg-*/; do
-            PLATFORM="${dir%/}"
-            # 把 jaysenwxapkg 或 jaysenwxapkg.exe 重命名为带平台名的
-            for binary in "${dir}"jaysenwxapkg*; do
-              if [ -f "$binary" ]; then
-                EXT=""
-                if [[ "$binary" == *.exe ]]; then EXT=".exe"; fi
-                NEWNAME="jaysenwxapkg-${PLATFORM#jaysenwxapkg-}${EXT}"
-                mv "$binary" "$NEWNAME"
-                echo "Renamed: $binary -> $NEWNAME"
-              fi
-            done
-            rmdir "$dir" 2>/dev/null || true
+            [ -d "$dir" ] || continue
+            SUFFIX="${dir#jaysenwxapkg-}"
+            SUFFIX="${SUFFIX%/}"
+            BINARY="$dir"jaysenwxapkg
+            EXT=""
+            if [ -f "$dir"jaysenwxapkg.exe ]; then
+              BINARY="$dir"jaysenwxapkg.exe
+              EXT=".exe"
+            fi
+            TMPNAME="__jaysenwxapkg_tmp_${SUFFIX}${EXT}"
+            cp "$BINARY" "$TMPNAME"
+            rm -rf "$dir"
+            NEWNAME="jaysenwxapkg-${SUFFIX}${EXT}"
+            mv "$TMPNAME" "$NEWNAME"
+            echo "Released: $NEWNAME"
           done
+          ls -la
           sha256sum jaysenwxapkg-* > checksums.txt
           cat checksums.txt
 
