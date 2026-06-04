@@ -3,18 +3,11 @@ package analyze
 import (
 	"regexp"
 	"strings"
-
-	"github.com/dop251/goja/ast"
-	"github.com/dop251/goja/parser"
 )
 
-// ExtractAPIsFromJS 通过 AST 解析 JS 代码，提取字符串字面量和对象属性中的 URL
+// ExtractAPIsFromJS 从 JS 源码中提取字符串字面量、模板字符串里的 URL
+// 使用自定义扫描器，不依赖外部 AST 库
 func ExtractAPIsFromJS(content string) []string {
-	program, err := parser.ParseFile(nil, "", content, 0)
-	if err != nil {
-		return nil
-	}
-
 	seen := make(map[string]bool)
 	var results []string
 
@@ -27,201 +20,165 @@ func ExtractAPIsFromJS(content string) []string {
 		results = append(results, s)
 	}
 
-	var walk func(node interface{})
-	walk = func(node interface{}) {
-		if node == nil {
-			return
-		}
-
-		switch n := node.(type) {
-
-		// —— 字符字面量：提取 URL ——
-		case *ast.StringLiteral:
-			for _, u := range extractURLs(n.Value) {
-				addURL(u)
-			}
-
-		// —— 模板字符串 ——
-		case *ast.TemplateLiteral:
-			for _, part := range n.Parts {
-				walk(part)
-			}
-
-		// —— 二元表达式（拼接） ——
-		case *ast.BinaryExpression:
-			walk(n.Left)
-			walk(n.Right)
-
-		// —— 调用表达式 ——
-		case *ast.CallExpression:
-			walk(n.Callee)
-			for _, arg := range n.ArgumentList {
-				walk(arg)
-			}
-
-		// —— 对象字面量：url/api 等关键 key 的值直接提取 ——
-		case *ast.ObjectLiteral:
-			for _, prop := range n.Value {
-				key := strings.ToLower(prop.Key)
-				isURLKey := key == "url" || key == "api" || key == "baseurl" ||
-					key == "base_url" || key == "uri" || key == "endpoint" ||
-					key == "target" || key == "action" || key == "redirect" ||
-					key == "src" || key == "href" || key == "link" ||
-					key == "path" || key == "requesturl" || key == "request_url"
-				if isURLKey {
-					if sl, ok := prop.Value.(*ast.StringLiteral); ok {
-						for _, u := range extractURLs(sl.Value) {
-							addURL(u)
-						}
-						continue
-					}
-				}
-				walk(prop.Value)
-			}
-
-		// —— 数组字面量 ——
-		case *ast.ArrayLiteral:
-			for _, v := range n.Value {
-				walk(v)
-			}
-
-		// —— 函数字面量 ——
-		case *ast.FunctionLiteral:
-			walk(n.Body)
-
-		// —— 函数声明 ——
-		case *ast.FunctionDeclaration:
-			walk(n.Function)
-
-		// —— 表达式语句 ——
-		case *ast.ExpressionStatement:
-			walk(n.Expression)
-
-		// —— 变量声明（var） ——
-		case *ast.VariableStatement:
-			for _, expr := range n.List {
-				walk(expr)
-			}
-		case *ast.VariableExpression:
-			walk(n.Initializer)
-
-		// —— 块语句 ——
-		case *ast.BlockStatement:
-			for _, stmt := range n.List {
-				walk(stmt)
-			}
-
-		// —— return ——
-		case *ast.ReturnStatement:
-			walk(n.Argument)
-
-		// —— if ——
-		case *ast.IfStatement:
-			walk(n.Test)
-			walk(n.Consequent)
-			walk(n.Alternate)
-
-		// —— 赋值 ——
-		case *ast.AssignExpression:
-			walk(n.Left)
-			walk(n.Right)
-
-		// —— 条件表达式 ——
-		case *ast.ConditionalExpression:
-			walk(n.Test)
-			walk(n.Consequent)
-			walk(n.Alternate)
-
-		// —— 序列表达式 ——
-		case *ast.SequenceExpression:
-			for _, e := range n.Sequence {
-				walk(e)
-			}
-
-		// —— 一元表达式 ——
-		case *ast.UnaryExpression:
-			walk(n.Operand)
-
-		// —— new 表达式 ——
-		case *ast.NewExpression:
-			walk(n.Callee)
-			for _, arg := range n.ArgumentList {
-				walk(arg)
-			}
-
-		// —— 成员表达式 ——
-		case *ast.DotExpression:
-			walk(n.Left)
-		case *ast.BracketExpression:
-			walk(n.Left)
-			walk(n.Member)
-
-		// —— for 循环 ——
-		case *ast.ForStatement:
-			walk(n.Initializer)
-			walk(n.Test)
-			walk(n.Update)
-			walk(n.Body)
-		case *ast.ForInStatement:
-			walk(n.Into)
-			walk(n.Source)
-			walk(n.Body)
-
-		// —— while / do-while ——
-		case *ast.WhileStatement:
-			walk(n.Test)
-			walk(n.Body)
-		case *ast.DoWhileStatement:
-			walk(n.Test)
-			walk(n.Body)
-
-		// —— switch ——
-		case *ast.SwitchStatement:
-			walk(n.Discriminant)
-			for _, cs := range n.Body {
-				walk(cs)
-			}
-		case *ast.CaseStatement:
-			walk(n.Test)
-			for _, stmt := range n.Consequent {
-				walk(stmt)
-			}
-
-		// —— try / catch ——
-		case *ast.TryStatement:
-			walk(n.Body)
-			if n.Catch != nil {
-				walk(n.Catch)
-			}
-			walk(n.Finally)
-		case *ast.CatchStatement:
-			walk(n.Body)
-
-		// —— throw / label / with ——
-		case *ast.ThrowStatement:
-			walk(n.Argument)
-		case *ast.LabelledStatement:
-			walk(n.Statement)
-		case *ast.WithStatement:
-			walk(n.Object)
-			walk(n.Body)
-
-		// —— 叶子节点 ——
-		case *ast.EmptyStatement, *ast.ThisExpression, *ast.Identifier,
-			*ast.NullLiteral, *ast.BooleanLiteral, *ast.NumberLiteral,
-			*ast.RegExpLiteral, *ast.SuperExpression, *ast.BranchStatement:
-			// 无子节点
-
-		// —— Program（根） ——
-		case *ast.Program:
-			for _, stmt := range n.Body {
-				walk(stmt)
-			}
+	// 提取所有 JS 字符串（单引号、双引号、模板字符串）
+	strings := extractJSStrings(content)
+	for _, s := range strings {
+		for _, u := range extractURLs(s) {
+			addURL(u)
 		}
 	}
 
-	walk(program)
 	return results
+}
+
+// extractJSStrings 从 JS 源码中提取所有字符串字面量内容
+func extractJSStrings(src string) []string {
+	var results []string
+	var i int
+	n := len(src)
+
+	for i < n {
+		// 跳过注释
+		if i+1 < n && src[i] == '/' {
+			if src[i+1] == '/' {
+				// 单行注释，跳过整行
+				i += 2
+				for i < n && src[i] != '\n' {
+					i++
+				}
+				continue
+			}
+			if src[i+1] == '*' {
+				// 多行注释，跳到 */
+				i += 2
+				for i+1 < n && !(src[i] == '*' && src[i+1] == '/') {
+					i++
+				}
+				i += 2
+				continue
+			}
+		}
+
+		ch := src[i]
+
+		if ch == '\'' {
+			s := extractQuoted(src, i+1, '\'')
+			if s != nil {
+				results = append(results, *s)
+				i = endOfLiteral(src, i+len(*s)+2)
+				continue
+			}
+		}
+
+		if ch == '"' {
+			s := extractQuoted(src, i+1, '"')
+			if s != nil {
+				results = append(results, *s)
+				i = endOfLiteral(src, i+len(*s)+2)
+				continue
+			}
+		}
+
+		if ch == '`' {
+			s := extractTemplate(src, i+1)
+			if s != nil {
+				results = append(results, *s)
+				i = endOfLiteral(src, i+len(*s)+2)
+				continue
+			}
+		}
+
+		i++
+	}
+
+	return results
+}
+
+// extractQuoted 提取引号内的字符串内容，处理转义
+func extractQuoted(src string, start int, quote byte) *string {
+	var buf strings.Builder
+	for i := start; i < len(src); i++ {
+		ch := src[i]
+		if ch == '\\' && i+1 < len(src) {
+			i++
+			// 处理常见转义序列
+			switch src[i] {
+			case 'n':
+				buf.WriteByte('\n')
+			case 't':
+				buf.WriteByte('\t')
+			case 'r':
+				buf.WriteByte('\r')
+			case '\\':
+				buf.WriteByte('\\')
+			case '\'':
+				buf.WriteByte('\'')
+			case '"':
+				buf.WriteByte('"')
+			case 'u':
+				// \uXXXX — 跳过，不解析
+				if i+5 < len(src) {
+					buf.WriteString(src[i-1 : i+5])
+					i += 4
+				}
+			default:
+				buf.WriteByte(src[i])
+			}
+			continue
+		}
+		if ch == quote {
+			s := buf.String()
+			return &s
+		}
+		if ch == '\n' || ch == '\r' {
+			return nil // 字符串内不应有未转义换行
+		}
+		buf.WriteByte(ch)
+	}
+	return nil
+}
+
+// extractTemplate 提取模板字符串中的静态部分，跳过 ${...} 插值
+func extractTemplate(src string, start int) *string {
+	var buf strings.Builder
+	for i := start; i < len(src); i++ {
+		ch := src[i]
+		if ch == '`' {
+			s := buf.String()
+			return &s
+		}
+		if ch == '$' && i+1 < len(src) && src[i+1] == '{' {
+			// 跳过插值表达式
+			buf.WriteString("${}")
+			i += 2
+			depth := 1
+			for i < len(src) && depth > 0 {
+				if src[i] == '{' {
+					depth++
+				} else if src[i] == '}' {
+					depth--
+				}
+				i++
+			}
+			i-- // 回退一步，循环会 i++
+			continue
+		}
+		if ch == '\\' && i+1 < len(src) {
+			i++
+			buf.WriteByte(src[i])
+			continue
+		}
+		buf.WriteByte(ch)
+	}
+	return nil
+}
+
+// endOfLiteral 计算字符串字面量结束后的位置
+func endOfLiteral(src string, offset int) int {
+	if offset >= len(src) {
+		return len(src)
+	}
+	return offset
 }
 
 // urlPattern 匹配 http/https/ftp/ws URL 和以 / 开头的路径
