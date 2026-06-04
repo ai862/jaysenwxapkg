@@ -101,6 +101,9 @@ func AnalyzeDirectory(dir string, compiledConfig *config.CompiledConfig) (*Analy
 		if strings.HasSuffix(path, ".js") {
 			astAPIs := ExtractAPIsFromJS(textContent)
 			for _, u := range astAPIs {
+				if !isValidAPI(u, compiledConfig) {
+					continue
+				}
 				result.APIs = append(result.APIs, APIInfo{
 					File: relPath,
 					API:  u,
@@ -118,6 +121,53 @@ func AnalyzeDirectory(dir string, compiledConfig *config.CompiledConfig) (*Analy
 	return result, err
 }
 
+// isValidAPI 检查 API/URL 是否有效，过滤无意义的静态资源路径和垃圾数据
+func isValidAPI(api string, cfg *config.CompiledConfig) bool {
+	// 长度过滤：超过 300 字符的多为 base64/编码数据
+	if len(api) > 300 {
+		return false
+	}
+
+	// 高比例非 ASCII / 控制字符的字符串（编码数据、二进制片段）
+	nonASCII := 0
+	for _, r := range api {
+		if r > 127 || (r < 32 && r != '\n' && r != '\r') {
+			nonASCII++
+		}
+	}
+	if len(api) > 20 && float64(nonASCII)/float64(len(api)) > 0.3 {
+		return false
+	}
+
+	// 很多连续的大写字母/数字大概率是 base64
+	if len(api) > 80 {
+		upperOrDigit := 0
+		for _, r := range api {
+			if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '/' || r == '+' || r == '=' {
+				upperOrDigit++
+			}
+		}
+		if float64(upperOrDigit)/float64(len(api)) > 0.8 {
+			return false
+		}
+	}
+
+	// 前缀黑名单
+	for _, prefix := range cfg.PrefixBlacklist {
+		if strings.Contains(api, prefix) {
+			return false
+		}
+	}
+
+	// 后缀黑名单（去掉查询参数和哈希后再检查）
+	suffix := getURLSuffix(api)
+	if cfg.SuffixBlacklist[suffix] {
+		return false
+	}
+
+	return true
+}
+
 // 提取 API
 func extractAPIs(content, filePath string, cfg *config.CompiledConfig) []APIInfo {
 	var results []APIInfo
@@ -125,7 +175,6 @@ func extractAPIs(content, filePath string, cfg *config.CompiledConfig) []APIInfo
 	matches := cfg.APIPattern.FindAllStringSubmatch(content, -1)
 	for _, match := range matches {
 		var api string
-		// 查找第一个非空的分组
 		for i := 1; i < len(match); i++ {
 			if match[i] != "" {
 				api = match[i]
@@ -133,29 +182,8 @@ func extractAPIs(content, filePath string, cfg *config.CompiledConfig) []APIInfo
 			}
 		}
 
-		if api == "" {
+		if api == "" || !isValidAPI(api, cfg) {
 			continue
-		}
-
-		// 检查前缀黑名单
-		filtered := false
-		for _, prefix := range cfg.PrefixBlacklist {
-			if strings.Contains(api, prefix) {
-				filtered = true
-				break
-			}
-		}
-
-		if filtered {
-			continue
-		}
-
-		// 检查后缀黑名单（仅对无参数的 URL）
-		if !strings.Contains(api, "?") {
-			suffix := getURLSuffix(api)
-			if cfg.SuffixBlacklist[suffix] {
-				continue
-			}
 		}
 
 		results = append(results, APIInfo{
