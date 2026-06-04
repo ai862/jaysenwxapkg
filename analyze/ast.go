@@ -8,8 +8,7 @@ import (
 	"github.com/dop251/goja/parser"
 )
 
-// ExtractAPIsFromJS 通过 AST 解析 JS 代码，提取字符串字面量和模板字符串中的 URL
-// 返回去重后的 URL 列表
+// ExtractAPIsFromJS 通过 AST 解析 JS 代码，提取字符串字面量和对象属性中的 URL
 func ExtractAPIsFromJS(content string) []string {
 	program, err := parser.ParseFile(nil, "", content, 0)
 	if err != nil {
@@ -36,31 +35,31 @@ func ExtractAPIsFromJS(content string) []string {
 
 		switch n := node.(type) {
 
-		// ── 字符串字面量 ──
+		// —— 字符字面量：提取 URL ——
 		case *ast.StringLiteral:
 			for _, u := range extractURLs(n.Value) {
 				addURL(u)
 			}
 
-		// ── 模板字符串（`...`） ──
+		// —— 模板字符串 ——
 		case *ast.TemplateLiteral:
 			for _, part := range n.Parts {
 				walk(part)
 			}
 
-		// ── 二元表达式（字符串拼接） ──
+		// —— 二元表达式（拼接） ——
 		case *ast.BinaryExpression:
 			walk(n.Left)
 			walk(n.Right)
 
-		// ── 调用表达式 ──
+		// —— 调用表达式 ——
 		case *ast.CallExpression:
 			walk(n.Callee)
 			for _, arg := range n.ArgumentList {
 				walk(arg)
 			}
 
-		// ── 对象字面量 — 关键键名（url/api/baseUrl）的值 → 直接提取 ──
+		// —— 对象字面量：url/api 等关键 key 的值直接提取 ——
 		case *ast.ObjectLiteral:
 			for _, prop := range n.Value {
 				key := strings.ToLower(prop.Key)
@@ -80,11 +79,25 @@ func ExtractAPIsFromJS(content string) []string {
 				walk(prop.Value)
 			}
 
-		// ── 表达式语句 ──
+		// —— 数组字面量 ——
+		case *ast.ArrayLiteral:
+			for _, v := range n.Value {
+				walk(v)
+			}
+
+		// —— 函数字面量 ——
+		case *ast.FunctionLiteral:
+			walk(n.Body)
+
+		// —— 函数声明 ——
+		case *ast.FunctionDeclaration:
+			walk(n.Function)
+
+		// —— 表达式语句 ——
 		case *ast.ExpressionStatement:
 			walk(n.Expression)
 
-		// ── 变量声明（var） ──
+		// —— 变量声明（var） ——
 		case *ast.VariableStatement:
 			for _, expr := range n.List {
 				walk(expr)
@@ -92,78 +105,58 @@ func ExtractAPIsFromJS(content string) []string {
 		case *ast.VariableExpression:
 			walk(n.Initializer)
 
-		// ── let/const ──
-		case *ast.LexicalDeclaration:
-			for _, expr := range n.List {
-				walk(expr)
-			}
-
-		// ── 块语句 ──
+		// —— 块语句 ——
 		case *ast.BlockStatement:
 			for _, stmt := range n.List {
 				walk(stmt)
 			}
 
-		// ── return ──
+		// —— return ——
 		case *ast.ReturnStatement:
 			walk(n.Argument)
 
-		// ── if ──
+		// —— if ——
 		case *ast.IfStatement:
 			walk(n.Test)
 			walk(n.Consequent)
 			walk(n.Alternate)
 
-		// ── 赋值 ──
+		// —— 赋值 ——
 		case *ast.AssignExpression:
 			walk(n.Left)
 			walk(n.Right)
 
-		// ── 条件 ──
+		// —— 条件表达式 ——
 		case *ast.ConditionalExpression:
 			walk(n.Test)
 			walk(n.Consequent)
 			walk(n.Alternate)
 
-		// ── 序列 ──
+		// —— 序列表达式 ——
 		case *ast.SequenceExpression:
 			for _, e := range n.Sequence {
 				walk(e)
 			}
 
-		// ── 一元 ──
+		// —— 一元表达式 ——
 		case *ast.UnaryExpression:
 			walk(n.Operand)
 
-		// ── new ──
+		// —— new 表达式 ——
 		case *ast.NewExpression:
 			walk(n.Callee)
 			for _, arg := range n.ArgumentList {
 				walk(arg)
 			}
 
-		// ── 成员表达式 ──
+		// —— 成员表达式 ——
 		case *ast.DotExpression:
 			walk(n.Left)
 		case *ast.BracketExpression:
 			walk(n.Left)
 			walk(n.Member)
 
-		// ── 数组字面量 ──
-		case *ast.ArrayLiteral:
-			for _, v := range n.Value {
-				walk(v)
-			}
-
-		// ── 函数 ──
-		case *ast.FunctionLiteral:
-			walk(n.Body)
-		case *ast.FunctionDeclaration:
-			walk(n.Function)
-		case *ast.ArrowFunctionLiteral:
-			walk(n.Body)
-
-		// ── for ──
+		// —— for 循环 ——
 		case *ast.ForStatement:
 			walk(n.Initializer)
 			walk(n.Test)
@@ -173,12 +166,8 @@ func ExtractAPIsFromJS(content string) []string {
 			walk(n.Into)
 			walk(n.Source)
 			walk(n.Body)
-		case *ast.ForOfStatement:
-			walk(n.Into)
-			walk(n.Source)
-			walk(n.Body)
 
-		// ── while/do-while ──
+		// —— while / do-while ——
 		case *ast.WhileStatement:
 			walk(n.Test)
 			walk(n.Body)
@@ -186,7 +175,7 @@ func ExtractAPIsFromJS(content string) []string {
 			walk(n.Test)
 			walk(n.Body)
 
-		// ── switch ──
+		// —— switch ——
 		case *ast.SwitchStatement:
 			walk(n.Discriminant)
 			for _, cs := range n.Body {
@@ -198,7 +187,7 @@ func ExtractAPIsFromJS(content string) []string {
 				walk(stmt)
 			}
 
-		// ── try/catch ──
+		// —— try / catch ——
 		case *ast.TryStatement:
 			walk(n.Body)
 			if n.Catch != nil {
@@ -208,7 +197,7 @@ func ExtractAPIsFromJS(content string) []string {
 		case *ast.CatchStatement:
 			walk(n.Body)
 
-		// ── throw / label / with ──
+		// —— throw / label / with ——
 		case *ast.ThrowStatement:
 			walk(n.Argument)
 		case *ast.LabelledStatement:
@@ -217,67 +206,13 @@ func ExtractAPIsFromJS(content string) []string {
 			walk(n.Object)
 			walk(n.Body)
 
-		// ── class ──
-		case *ast.ClassDeclaration:
-			walk(n.Class)
-		case *ast.ClassLiteral:
-			for _, elem := range n.Elements {
-				walk(elem)
-			}
-		case *ast.MethodDefinition:
-			for _, arg := range n.Params.List {
-				walk(arg)
-			}
-			walk(n.Body)
+		// —— 叶子节点 ——
+		case *ast.EmptyStatement, *ast.ThisExpression, *ast.Identifier,
+			*ast.NullLiteral, *ast.BooleanLiteral, *ast.NumberLiteral,
+			*ast.RegExpLiteral, *ast.SuperExpression, *ast.BranchStatement:
+			// 无子节点
 
-		// ── for 初始化器 ──
-		case *ast.ForLoopInitializerExpression:
-			walk(n.Initializer)
-		case *ast.ForLoopInitializerVarDeclList:
-			for _, ve := range n.List {
-				walk(ve)
-			}
-		case *ast.ForLoopInitializerLexicalDecl:
-			for _, ve := range n.List {
-				walk(ve)
-			}
-
-		// ── for-into ──
-		case *ast.ForIntoExpression:
-			walk(n.Into)
-		case *ast.ForIntoVar:
-			for _, ve := range n.List {
-				walk(ve)
-			}
-
-		// ── for 声明 ──
-		case *ast.ForDeclaration:
-			for _, ve := range n.List {
-				walk(ve)
-			}
-
-		// ── 展开 / await / yield ──
-		case *ast.SpreadElement:
-			walk(n.Expression)
-		case *ast.AwaitExpression:
-			walk(n.Argument)
-		case *ast.YieldExpression:
-			walk(n.Argument)
-
-		// ── 叶子节点 ──
-		case *ast.EmptyStatement:
-		case *ast.ThisExpression:
-		case *ast.Identifier:
-		case *ast.NullLiteral:
-		case *ast.BooleanLiteral:
-		case *ast.NumberLiteral:
-		case *ast.RegExpLiteral:
-		case *ast.SuperExpression:
-		case *ast.Binding:
-		case *ast.PrivateIdentifier:
-		case *ast.BranchStatement:
-
-		// ── Program（根） ──
+		// —— Program（根） ——
 		case *ast.Program:
 			for _, stmt := range n.Body {
 				walk(stmt)
